@@ -61,14 +61,13 @@ class Model:
         )
 
     @modal.method()
-    def generate(self, user_questions):
+    def generate(self, user_questions, max_tokens=512):
         prompts = [self.template.format(user=q) for q in user_questions]
 
         sampling_params = vllm.SamplingParams(
             temperature=0.75,
             top_p=0.99,
-            # can increase or decrease max_tokens if you want more or less scenes, although I realized that the model sometimes will start generating jibberish past 512, especially if we exclude the stop parameter
-            max_tokens=512,
+            max_tokens=max_tokens,
             presence_penalty=1.15,
             stop=["<end_of_turn>", "<start_of_turn>user"]
         )
@@ -78,9 +77,10 @@ class Model:
 @app.local_entrypoint()
 def main():
     user_input = os.environ.get("USER_INPUT")
+    max_tokens = int(os.environ.get("MAX_TOKENS", 512))
     if not user_input:
         raise ValueError("No input provided.")
     questions = [user_input]
     model = Model()
-    results = model.generate.remote(questions)
+    results = model.generate.remote(questions, max_tokens)
     print(json.dumps(results))
