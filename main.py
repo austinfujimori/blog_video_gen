@@ -84,36 +84,36 @@ def main():
     prompt = "Can you generate a short, interesting, and persuasive script for a narrator for a slideshow video that summarizes the details of the blog provided below. Break the slides down into slides titled Slide X. Do not bold the title, just give the list of slides exactly in this format with nothing else (the following is an example) Slide 1: [slide], Slide 2: [slide]. Do not include Narrator:, just give the raw script. Please do 2 sentences max per slide, keep it concise. Make the script a summary of the following blog: " + full_text
     response = get_text(prompt, 384)
 
-    print("Raw Response:\n", response)  # Debugging
+    print("Raw Response:\n", response)  
 
     response_scenes = extract_scenes(response[0])
-    print("Response Scenes:\n", response_scenes)  # Debugging
+    print("Response Scenes:\n", response_scenes)  
 
     image_prompt = "For each of these slides "
     for slide in response_scenes:
-        print(slide + "\n\n")  # Debugging
+        print(slide + "\n\n")  
         image_prompt += slide
 
     # Get image descriptions
     image_prompt += "come up with a detailed description of a " + style + " styled image for each slide that accommodates what the description is talking about. Provide the output in the format: Give the list of slides in the format: Slide 1: [image description], Slide 2: [image description]."
     image_prompt_response = get_text(image_prompt, 512)
-    print("\nImage Prompt Response:\n", image_prompt_response)  # Debugging
+    print("\nImage Prompt Response:\n", image_prompt_response)  
     
     image_descriptions = extract_scenes(image_prompt_response[0])
     for description in image_descriptions:
         description += "generate in a " + style + "style"
 
-    print("\nImage Descriptions:\n", image_descriptions)  # Debugging
+    print("\nImage Descriptions:\n", image_descriptions)  
 
     # Generate image for each description
     image_urls = generate_images(image_descriptions)
-    print("Image URLs:\n", image_urls)  # Debugging
+    print("Image URLs:\n", image_urls)  
     with open("image_urls.json", "w") as file:
         json.dump(image_urls, file)
 
     # Strip responses of the title part for narration
     narration_script = strip_titles(response_scenes)
-    print("Narration Script:\n", narration_script)  # Debugging
+    print("Narration Script:\n", narration_script)  
 
     # Create movie
     if image_urls:
