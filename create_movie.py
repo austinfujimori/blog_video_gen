@@ -20,7 +20,7 @@ client = ElevenLabs(api_key=ELEVENLABS_API_KEY)
 
 
 FONT_PATH = "Arial-Bold.ttf"
-MAX_WORDS_PER_LINE = 10
+MAX_WORDS_PER_LINE = 6
 
 def download_image(image_url):
     response = requests.get(image_url)
