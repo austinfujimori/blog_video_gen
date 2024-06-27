@@ -9,9 +9,9 @@ if len(sys.argv) < 2:
 scene_description = sys.argv[1]
 
 response = client.images.generate(
-  model="dall-e-3",
+  model="dall-e-2",
   prompt=scene_description,
-  size="1024x1024",
+  size="512x512",
   quality="standard",
   n=1,
 )
