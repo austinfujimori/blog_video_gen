@@ -1,4 +1,4 @@
-from moviepy.editor import ImageClip, TextClip, CompositeVideoClip, concatenate_videoclips, AudioFileClip, ColorClip, CompositeAudioClip
+from moviepy.editor import ImageClip, TextClip, CompositeVideoClip, concatenate_videoclips, AudioFileClip, ColorClip, CompositeAudioClip, VideoFileClip
 import requests
 from PIL import Image
 from io import BytesIO
@@ -9,6 +9,8 @@ from elevenlabs import VoiceSettings
 from elevenlabs.client import ElevenLabs
 from moviepy.video.fx.all import speedx
 import replicate
+import json
+import subprocess
 
 
 os.environ['IMAGEMAGICK_BINARY'] = '/opt/homebrew/bin/magick'
@@ -20,13 +22,88 @@ client = ElevenLabs(api_key=ELEVENLABS_API_KEY)
 
 
 FONT_PATH = "Arial-Bold.ttf"
-MAX_WORDS_PER_LINE = 6
+MAX_WORDS_PER_LINE = 5
 
-def download_image(image_url):
+
+
+
+def download_video(remote_video_name, index):
+    volume_name = "model-cache-volume"
+    local_video_path = os.path.join('videos')
+    local_video_path_name = os.path.join('videos', f"12_gen_video_{index}_0000.mp4")
+
+    if not os.path.exists('videos'):
+        os.makedirs('videos')
+
+    command = f"modal volume get {volume_name} {remote_video_name} {local_video_path}"
+    try:
+        result = subprocess.run(command, shell=True, check=True, capture_output=True, text=True)
+        print("Video downloaded from volume successfully.")
+        print(f"Standard Output:\n{result.stdout}")
+        print(f"Standard Error:\n{result.stderr}")
+        return local_video_path_name
+    except subprocess.CalledProcessError as e:
+        print(f"Video download failed with exit code {e.returncode}")
+        print(f"Standard Output:\n{e.stdout}")
+        print(f"Standard Error:\n{e.stderr}")
+        return None
+
+
+
+
+def upload_image_to_volume(local_image_path, remote_image_name, volume_name):
+    
+    command = f"modal volume put {volume_name} {local_image_path} {remote_image_name}"
+    try:
+        result = subprocess.run(command, shell=True, check=True, capture_output=True, text=True)
+        print("Image uploaded to volume successfully.")
+        print(f"Standard Output:\n{result.stdout}")
+        print(f"Standard Error:\n{result.stderr}")
+    except subprocess.CalledProcessError as e:
+        if "already exists" in e.stderr:
+            print("Image already exists in volume. Skipping upload.")
+        else:
+            print(f"Image upload failed with exit code {e.returncode}")
+            print(f"Standard Output:\n{e.stdout}")
+            print(f"Standard Error:\n{e.stderr}")
+
+def run_modal_main(image_paths, prompts, file_mount_names, sample_names, durations, resolutions, aspect_ratios):
+    for idx in range(len(image_paths)):
+        upload_image_to_volume(image_paths[idx], file_mount_names[idx], "model-cache-volume")
+
+    command = (
+        f"modal run generate_video.py::main "
+        f"--image-paths '{json.dumps(image_paths)}' "
+        f"--prompts '{json.dumps(prompts)}' "
+        f"--file-mount-names '{json.dumps(file_mount_names)}' "
+        f"--sample-names '{json.dumps(sample_names)}' "
+        f"--durations '{json.dumps(durations)}' "
+        f"--resolutions '{json.dumps(resolutions)}' "
+        f"--aspect-ratios '{json.dumps(aspect_ratios)}'"
+    )
+
+    try:
+        result = subprocess.run(command, shell=True, check=True, capture_output=True, text=True)
+        print("Modal run command executed successfully.")
+        print(f"Standard Output:\n{result.stdout}")
+        print(f"Standard Error:\n{result.stderr}")
+    except subprocess.CalledProcessError as e:
+        print(f"Modal run command failed with exit code {e.returncode}")
+        print(f"Standard Output:\n{e.stdout}")
+        print(f"Standard Error:\n{e.stderr}")
+        
+        
+        
+        
+        
+
+def download_image(image_url, index):
     response = requests.get(image_url)
     if response.status_code == 200:
         image = Image.open(BytesIO(response.content))
-        image_path = f"{image_url.split('/')[-1]}.png"
+        if not os.path.exists('images'):
+            os.makedirs('images')
+        image_path = os.path.join('images', f"image{index}.png")
         image.save(image_path)
         return image_path
     else:
@@ -110,7 +187,7 @@ def generate_music(prompt, duration):
     else:
         raise Exception("Failed to get music URL from response.")
 
-def create_movie(image_urls, narrations, music_prompt, narration_speed=1.0, output_file="output_video.mp4", fps=24):
+def create_movie(image_urls, image_descriptions, narrations, music_prompt, narration_speed=1.0, output_file="output_video.mp4", fps=24, resolution="480p", aspect_ratio="9:16"):
     audio_clips = []
     audio_files = []
     sum_of_clips_duration = 0
@@ -119,7 +196,7 @@ def create_movie(image_urls, narrations, music_prompt, narration_speed=1.0, outp
     # Generate narration audio and calculate the sum of clip durations
     for i, image_url in enumerate(image_urls):
         # Download the image and save the path
-        image_path = download_image(image_url)
+        image_path = download_image(image_url, i+1)
         images_paths.append(image_path)
         print(f"Downloaded image {i + 1}: {image_path}")  # Debug info
 
@@ -158,12 +235,63 @@ def create_movie(image_urls, narrations, music_prompt, narration_speed=1.0, outp
 
     # Create video clips with scaled durations
     scaled_clips = []
+    
+    # Scaled durations for the audio clips (due to audio for full script taking longer/shorter than audio for combined clips)
+    # These durations also represent the length for each "scene"
+    scaled_durations = []
+    prompts = []
+    file_mount_names = []
+    sample_names = []
+    resolutions = []
+    aspect_ratios = []
     for i, image_path in enumerate(images_paths):
         audio_clip = audio_clips[i]
-        scaled_duration = audio_clip.duration * duration_scale
+        scaled_durations.append(audio_clip.duration * duration_scale)
+        
+        # args for create videos
+        file_mount_names.append(f"12_image{i}.png")
+        sample_names.append(f"12_gen_video_{i}")
+        resolutions.append(resolution)
+        aspect_ratios.append(aspect_ratio)
+        prompts.append(image_descriptions[i])
+        # prompts.append(image_descriptions[i])
+        
+    # since open-sora only accepts durations of 2, 4, 8, 16s, we have to make it longer then cut it short
+    durations = []
+    for duration in scaled_durations:
+        if duration < 2:
+            durations.append("2s")
+        elif duration < 4:
+            durations.append("4s")
+        elif duration < 8:
+            durations.append("8s")
+        else:
+            durations.append("16s")
+    
+    for prompt in prompts:
+        print(f"\n\n\n{prompt}")
+    
+    # rn generate_video has some issues with accepting the arrays of prompts as input (specifically jsut using first image for all of them)
+    # so let's run it individually in the meantime
+    for i in range(len(images_paths)):
+        run_modal_main([images_paths[i]], [prompts[i]], [file_mount_names[i]], [sample_names[i]], [durations[i]], [resolutions[i]], [aspect_ratios[i]])
+    
+    print("\n\n\n\n\n\n\nfinished inference for vids\n\n\n\n\n\n\n")
+    
+    
+    # Download videos and store paths
+    video_paths = []
+    for i in range(len(images_paths)):
+        video_path = download_video(f"12_gen_video_{i}_0000.mp4", i)
+        if video_path:
+            video_paths.append(video_path)
 
-        # Create an ImageClip with the scaled duration
-        image_clip = ImageClip(image_path).set_duration(scaled_duration)
+        
+    for i, video_path in enumerate(video_paths):
+        scaled_duration = scaled_durations[i]
+
+        # Create a VideoClip with the scaled duration
+        video_clip = VideoFileClip(video_path).subclip(0, scaled_duration)
 
         # Split the narration into lines for subtitles
         narration = narrations[i]
@@ -172,29 +300,36 @@ def create_movie(image_urls, narrations, music_prompt, narration_speed=1.0, outp
             print(f"No lines generated for slide {i + 1}")
             continue
 
-        line_duration = scaled_duration / len(lines)
-
         # Create clips for each line of subtitles
         line_clips = []
-        for line in lines:
+        for j, line in enumerate(lines):
             # Create a TextClip for the line
-            subtitle = TextClip(line, fontsize=30, color='white', font=FONT_PATH, method='caption', size=(image_clip.size[0], None))
-            subtitle = subtitle.set_duration(line_duration).set_position(('center', 'bottom'))
+            subtitle = TextClip(line, fontsize=30, color='white', font=FONT_PATH, method='caption', size=(video_clip.size[0], None))
+
+            if j < len(lines) - 1:
+                # Set the duration for non-last subtitles
+                subtitle_duration = scaled_duration / len(lines)
+            else:
+                # Set the duration for the last subtitle to extend to the end of the scene
+                subtitle_duration = scaled_duration - (len(lines) - 1) * (scaled_duration / len(lines))
+
+            subtitle = subtitle.set_duration(subtitle_duration).set_start(j * (scaled_duration / len(lines))).set_position(('center', 'bottom'))
 
             # Create a semi-transparent black background for each line
             bg_size = subtitle.size
-            bg_clip = ColorClip(size=(bg_size[0] + 20, bg_size[1] + 10), color=(0, 0, 0, 128)).set_duration(line_duration)
+            bg_clip = ColorClip(size=(bg_size[0] + 20, bg_size[1] + 10), color=(0, 0, 0, 128)).set_duration(subtitle_duration).set_start(j * (scaled_duration / len(lines)))
 
             # Combine the background and text
             subtitle_with_bg = CompositeVideoClip([bg_clip.set_position(('center', 'bottom')), subtitle.set_position(('center', 'bottom'))])
             line_clips.append(subtitle_with_bg)
 
-        # Concatenate line clips and set the position at the bottom of the image
-        final_subtitle_clip = concatenate_videoclips(line_clips).set_position(('center', 'bottom'))
-
-        # Overlay the final subtitle clip on the image
-        video_clip = CompositeVideoClip([image_clip, final_subtitle_clip])
+        # Overlay the final subtitle clip on the video
+        video_clip = CompositeVideoClip([video_clip] + line_clips)
         scaled_clips.append(video_clip)
+    
+    
+    
+    
 
     # Concatenate the scaled clips into the final video
     final_video = concatenate_videoclips(scaled_clips, method="compose")
@@ -224,7 +359,13 @@ def create_movie(image_urls, narrations, music_prompt, narration_speed=1.0, outp
 
 if __name__ == "__main__":
     image_urls = ["https://example.com/image1.png", "https://example.com/image2.png"]
+    image_descriptions = ["image prompt 1", "image prompt 2"]
     narrations = ["Narration for image 1. This is the first narration.", "Narration for image 2. This is the second narration."]
     narration_speed = 1
     music_prompt = "Example music prompt for testing"
-    create_movie(image_urls, narrations, music_prompt, narration_speed)
+    output_file="movie.mp4"
+    fps=24
+    resolution="480p"
+    aspect_ratio="9:16"
+    
+    create_movie(image_urls, image_descriptions, narrations, music_prompt, narration_speed,output_file,fps,resolution,aspect_ratio)

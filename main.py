@@ -28,7 +28,7 @@ def get_text(user_input, max_tokens=512):
 
 
 # Each scene is a sentence, sometiems LLM gets cut off and doesn't include END so just in case we end it at the last sentence. (period, exclamation point, question mark, etc.)
-# If sentence is longer than 10 words, cut it in half, cuz generated videos can't be that long unless they are looped
+# max_words cuz we want to limit duration of videos (max duration for open-sora is 16 sec)
 def extract_scenes(full_text):
     script_start = full_text.find("BEGIN_SCRIPT") + len("BEGIN_SCRIPT")
     script_end = full_text.find("END_SCRIPT")
@@ -37,26 +37,30 @@ def extract_scenes(full_text):
     script_text = full_text[script_start:script_end].strip()
     sentences = re.split(r'(?<!\w\.\w.)(?<![A-Z][a-z]\.)(?<=\.|\?|!)\s', script_text)
     
-    def split_long_sentence(sentence, max_words=10):
+    def split_long_sentence(sentence, max_words=11):
         words = sentence.split()
-        if len(words) > max_words:
-            mid = len(words) // 2
-            split_index = min(mid, max_words)
-            return [' '.join(words[:split_index]), ' '.join(words[split_index:])]
-        else:
+        if len(words) <= max_words:
             return [sentence]
         
-    # Strip whitespace, not empty
+        num_chunks = (len(words) + max_words - 1) // max_words  # calculate number of chunks needed
+        chunk_size = len(words) // num_chunks  # base size of each chunk
+        remainder = len(words) % num_chunks  # remaining words to distribute
+        
+        chunks = []
+        start = 0
+        for i in range(num_chunks):
+            extra_word = 1 if i < remainder else 0  # distribute the remainder words
+            end = start + chunk_size + extra_word
+            chunks.append(' '.join(words[start:end]))
+            start = end
+        return chunks
+    
     scenes = []
     for sentence in sentences:
-        sentence = sentence.strip()
-        if sentence:
-            scenes.extend(split_long_sentence(sentence))
-    if scenes and not re.match(r'.*[\.\?\!]$', scenes[-1]):
-        scenes.pop()
+        split_sentences = split_long_sentence(sentence)
+        scenes.extend(split_sentences)
+    
     return scenes
-
-
 
 
 # Creates list for image descriptions
@@ -153,9 +157,6 @@ def main():
     with open("image_urls.json", "w") as file:
         json.dump(image_urls, file)
     print("\n\n\n\n Image URLS: " + str(len(image_urls)))
-        
-        
-    # Generate short videos
     
     
     
@@ -173,7 +174,7 @@ def main():
     narration_script = response_scenes  
     
     if image_urls:
-        create_movie(image_urls, narration_script, music_response, narration_speed)
+        create_movie(image_urls, image_descriptions, narration_script, music_response, narration_speed)
 
 
 
