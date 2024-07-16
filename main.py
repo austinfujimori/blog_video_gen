@@ -6,6 +6,48 @@ from create_movie import create_movie
 import re
 
 
+
+# for clearing modal volume
+
+def list_files_in_volume(volume_name):
+    command = f"modal volume ls {volume_name}"
+    try:
+        result = subprocess.run(command, shell=True, check=True, capture_output=True, text=True)
+        if result.returncode == 0:
+            files = result.stdout.strip().split("\n")
+            return files
+        else:
+            print(f"Failed to list files in volume with exit code {result.returncode}")
+            print(f"Standard Output:\n{result.stdout}")
+            print(f"Standard Error:\n{result.stderr}")
+            return []
+    except subprocess.CalledProcessError as e:
+        print(f"Error listing files in volume: {e}")
+        return []
+
+def delete_files_in_volume(volume_name, files):
+    for file in files:
+        command = f"modal volume rm {volume_name} {file}"
+        try:
+            result = subprocess.run(command, shell=True, check=True, capture_output=True, text=True)
+            if result.returncode == 0:
+                print(f"File {file} deleted successfully.")
+            else:
+                print(f"Failed to delete file {file} with exit code {result.returncode}")
+                print(f"Standard Output:\n{result.stdout}")
+                print(f"Standard Error:\n{result.stderr}")
+        except subprocess.CalledProcessError as e:
+            print(f"Error deleting file {file}: {e}")
+
+def clear_modal_cache(volume_name):
+    files = list_files_in_volume(volume_name)
+    if files:
+        delete_files_in_volume(volume_name, files)
+    else:
+        print("No files to delete in volume.")
+        
+
+
 # Get resposne from LLM on Modal
 def get_text(user_input, max_tokens=512):
     env = os.environ.copy()
@@ -115,7 +157,8 @@ def main():
     
     
     
-    
+
+
 
     blog_info = get_blog_info(url)
 
@@ -124,8 +167,8 @@ def main():
     print('\n\n\n\n\n')
 
     # Get script
-    prompt = "Can you generate a concise, compelling, and immersive narration for a video that summarizes the blog provided below:" + full_text + "Do not include anything other than the narrator's dialogue. Start it with: BEGIN_SCRIPT and end it with END_SCRIPT, for example: BEGIN_SCRIPT The sun dipped below the horizon, casting a golden hue over the sprawling meadow. The air was crisp and carried the faint scent of blooming wildflowers. In the midst of this serene landscape, a lone figure ambled along a narrow, winding path, his silhouette elongated by the setting sun. This was Ethan, a man of quiet contemplation, seeking solace in the embrace of nature. His footsteps were slow and deliberate, crunching softly against the gravel underfoot. Each step seemed to resonate with a sense of purpose, a rhythm in harmony with the whispering breeze. END_SCRIPT."
-    response = get_text(prompt, 200) #384
+    prompt = "Can you generate a very short and immersive narration for a video that summarizes the blog provided below:" + full_text + "Do not include anything other than the narrator's dialogue. Keep the script as short as possible and try to summarize everything in the blog. Start it with: BEGIN_SCRIPT and end it with END_SCRIPT, for example: BEGIN_SCRIPT The sun dipped below the horizon, casting a golden hue over the sprawling meadow. The air was crisp and carried the faint scent of blooming wildflowers. In the midst of this serene landscape, a lone figure ambled along a narrow, winding path, his silhouette elongated by the setting sun. END_SCRIPT."
+    response = get_text(prompt, 120) #384
     # print("Raw Response:\n", response)
     
     # make a list for each scene (sentence)
@@ -159,6 +202,10 @@ def main():
     print("\n\n\n\n Image URLS: " + str(len(image_urls)))
     
     
+    for i in range(len(image_urls)):
+        print("\" " + image_urls[i] + "\", ")
+    
+    
     
     # Get music prompt
     music_prompt = "Generate a prompt for a music generator for music that would go along with a story like this: "
@@ -168,10 +215,22 @@ def main():
     print(music_response)
         
 
+        
+        
+        
+    # Clear Modal Volume
+    
+    
+    clear_modal_cache("model-cache-volume")
 
 
     # Create movie
     narration_script = response_scenes  
+    
+    
+
+    
+    
     
     if image_urls:
         create_movie(image_urls, image_descriptions, narration_script, music_response, narration_speed)

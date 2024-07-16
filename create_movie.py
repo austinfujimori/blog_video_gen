@@ -26,11 +26,10 @@ MAX_WORDS_PER_LINE = 5
 
 
 
-
 def download_video(remote_video_name, index):
     volume_name = "model-cache-volume"
     local_video_path = os.path.join('videos')
-    local_video_path_name = os.path.join('videos', f"12_gen_video_{index}_0000.mp4")
+    local_video_path_name = os.path.join('videos', f"gen_video_{index}_0000.mp4")
 
     if not os.path.exists('videos'):
         os.makedirs('videos')
@@ -49,10 +48,7 @@ def download_video(remote_video_name, index):
         return None
 
 
-
-
 def upload_image_to_volume(local_image_path, remote_image_name, volume_name):
-    
     command = f"modal volume put {volume_name} {local_image_path} {remote_image_name}"
     try:
         result = subprocess.run(command, shell=True, check=True, capture_output=True, text=True)
@@ -68,22 +64,24 @@ def upload_image_to_volume(local_image_path, remote_image_name, volume_name):
             print(f"Standard Error:\n{e.stderr}")
 
 def run_modal_main(image_paths, prompts, file_mount_names, sample_names, durations, resolutions, aspect_ratios):
+    # Upload images to volume
     for idx in range(len(image_paths)):
         upload_image_to_volume(image_paths[idx], file_mount_names[idx], "model-cache-volume")
 
-    command = (
-        f"modal run generate_video.py::main "
-        f"--image-paths '{json.dumps(image_paths)}' "
-        f"--prompts '{json.dumps(prompts)}' "
-        f"--file-mount-names '{json.dumps(file_mount_names)}' "
-        f"--sample-names '{json.dumps(sample_names)}' "
-        f"--durations '{json.dumps(durations)}' "
-        f"--resolutions '{json.dumps(resolutions)}' "
-        f"--aspect-ratios '{json.dumps(aspect_ratios)}'"
-    )
+    # Prepare command to run generate_video.py
+    command = [
+        "modal", "run", "generate_video.py::main",
+        "--image-paths", json.dumps(image_paths),
+        "--prompts", json.dumps(prompts),
+        "--file-mount-names", json.dumps(file_mount_names),
+        "--sample-names", json.dumps(sample_names),
+        "--durations", json.dumps(durations),
+        "--resolutions", json.dumps(resolutions),
+        "--aspect-ratios", json.dumps(aspect_ratios)
+    ]
 
     try:
-        result = subprocess.run(command, shell=True, check=True, capture_output=True, text=True)
+        result = subprocess.run(command, check=True, capture_output=True, text=True)
         print("Modal run command executed successfully.")
         print(f"Standard Output:\n{result.stdout}")
         print(f"Standard Error:\n{result.stderr}")
@@ -91,7 +89,6 @@ def run_modal_main(image_paths, prompts, file_mount_names, sample_names, duratio
         print(f"Modal run command failed with exit code {e.returncode}")
         print(f"Standard Output:\n{e.stdout}")
         print(f"Standard Error:\n{e.stderr}")
-        
         
         
         
@@ -108,8 +105,17 @@ def download_image(image_url, index):
         return image_path
     else:
         raise Exception(f"Failed to download image from {image_url}")
-
+    
+    
+    
+    
 def generate_narration(text, narration_speed):
+
+    if not os.path.exists('audio_temp'):
+        os.makedirs('audio_temp')
+    if not os.path.exists('audio'):
+        os.makedirs('audio')
+
     print(f"Generating narration for text: {text}")
     response = client.text_to_speech.convert(
         voice_id="pNInz6obpgDQGcFmaJgB",  # Adam pre-made voice
@@ -124,8 +130,9 @@ def generate_narration(text, narration_speed):
             use_speaker_boost=True,
         ),
     )
-
-    save_file_path = f"{uuid.uuid4()}.mp3"
+    
+    save_file_path = os.path.join('audio_temp', f"{uuid.uuid4()}.mp3")
+    
     with open(save_file_path, "wb") as f:
         for chunk in response:
             if chunk:
@@ -136,10 +143,13 @@ def generate_narration(text, narration_speed):
     # Adjust narration speed
     audio_clip = AudioFileClip(save_file_path)
     adjusted_audio_clip = speedx(audio_clip, narration_speed)
-    adjusted_audio_path = f"{uuid.uuid4()}_adjusted.mp3"
+    adjusted_audio_path = os.path.join('audio', f"{uuid.uuid4()}_adjusted.mp3")
     adjusted_audio_clip.write_audiofile(adjusted_audio_path)
 
     return adjusted_audio_path
+
+
+
 
 def split_text_into_lines(text, max_words_per_line):
     words = text.split()
@@ -186,8 +196,21 @@ def generate_music(prompt, duration):
         return music_file_path
     else:
         raise Exception("Failed to get music URL from response.")
+    
+    
+    
+def remove_quotes(image_descriptions):
+    return [desc.replace('"', '').replace("'", '') for desc in image_descriptions]
+
+
+
+
 
 def create_movie(image_urls, image_descriptions, narrations, music_prompt, narration_speed=1.0, output_file="output_video.mp4", fps=24, resolution="480p", aspect_ratio="9:16"):
+    
+    
+    image_descriptions = remove_quotes(image_descriptions)
+    
     audio_clips = []
     audio_files = []
     sum_of_clips_duration = 0
@@ -249,12 +272,11 @@ def create_movie(image_urls, image_descriptions, narrations, music_prompt, narra
         scaled_durations.append(audio_clip.duration * duration_scale)
         
         # args for create videos
-        file_mount_names.append(f"12_image{i}.png")
-        sample_names.append(f"12_gen_video_{i}")
+        file_mount_names.append(f"image{i}.png")
+        sample_names.append(f"gen_video_{i}")
         resolutions.append(resolution)
         aspect_ratios.append(aspect_ratio)
         prompts.append(image_descriptions[i])
-        # prompts.append(image_descriptions[i])
         
     # since open-sora only accepts durations of 2, 4, 8, 16s, we have to make it longer then cut it short
     durations = []
@@ -267,14 +289,17 @@ def create_movie(image_urls, image_descriptions, narrations, music_prompt, narra
             durations.append("8s")
         else:
             durations.append("16s")
+            
     
     for prompt in prompts:
         print(f"\n\n\n{prompt}")
     
-    # rn generate_video has some issues with accepting the arrays of prompts as input (specifically jsut using first image for all of them)
-    # so let's run it individually in the meantime
-    for i in range(len(images_paths)):
-        run_modal_main([images_paths[i]], [prompts[i]], [file_mount_names[i]], [sample_names[i]], [durations[i]], [resolutions[i]], [aspect_ratios[i]])
+    
+    # run in inference for vids in parallel
+    
+    run_modal_main(images_paths, prompts, file_mount_names, sample_names, durations, resolutions, aspect_ratios)
+
+
     
     print("\n\n\n\n\n\n\nfinished inference for vids\n\n\n\n\n\n\n")
     
@@ -282,7 +307,7 @@ def create_movie(image_urls, image_descriptions, narrations, music_prompt, narra
     # Download videos and store paths
     video_paths = []
     for i in range(len(images_paths)):
-        video_path = download_video(f"12_gen_video_{i}_0000.mp4", i)
+        video_path = download_video(f"gen_video_{i}_0000.mp4", i)
         if video_path:
             video_paths.append(video_path)
 
