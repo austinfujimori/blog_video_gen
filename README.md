@@ -35,7 +35,9 @@ Install the requirements (make sure you have a modal account)
 And put:
 
 REPLICATE_API_TOKEN=____
+
 OPENAI_API_KEY=____
+
 ELEVENLABS_API_KEY=____
 
 
